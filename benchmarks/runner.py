@@ -13,7 +13,6 @@ from pathlib import Path
 from .metrics import (
     compute_accuracy,
     compute_f1_scores,
-    compute_reasoning_metrics,
     compute_efficiency_metrics,
     generate_benchmark_report
 )
@@ -51,33 +50,43 @@ class BenchmarkRunner:
         
         print(f"\nEvaluating {model_name}...")
         
-        with torch.no_grad():
-            for batch in tqdm(dataloader, desc=f"{model_name}"):
-                # Handle different batch formats
-                if 'visual_features' in batch:
-                    inputs = batch['visual_features'].to(self.device)
-                elif 'features' in batch:
-                    inputs = batch['features'].to(self.device)
-                else:
-                    raise ValueError("Batch must contain 'visual_features' or 'features'")
-                
-                # Forward pass
-                outputs = model(inputs)
-                
-                if 'logits' in outputs:
-                    logits = outputs['logits']
-                    predictions = torch.argmax(logits, dim=-1).cpu().numpy()
-                    all_logits.extend(logits.cpu().numpy())
-                else:
-                    predictions = outputs.get('predictions', [])
-                
-                all_predictions.extend(predictions)
-                
-                # Get targets
-                if 'answer' in batch:
-                    # Convert answers to indices if needed
-                    targets = self._process_answers(batch['answer'])
-                    all_targets.extend(targets)
+        try:
+            with torch.no_grad():
+                for batch in tqdm(dataloader, desc=f"{model_name}"):
+                    # Handle different batch formats
+                    if 'visual_features' in batch:
+                        inputs = batch['visual_features']
+                        if isinstance(inputs, list):
+                            inputs = torch.stack(inputs)
+                        inputs = inputs.to(self.device)
+                    elif 'features' in batch:
+                        inputs = batch['features']
+                        if isinstance(inputs, list):
+                            inputs = torch.stack(inputs)
+                        inputs = inputs.to(self.device)
+                    else:
+                        raise ValueError("Batch must contain 'visual_features' or 'features'")
+                    
+                    # Forward pass
+                    outputs = model(inputs)
+                    
+                    if 'logits' in outputs:
+                        logits = outputs['logits']
+                        predictions = torch.argmax(logits, dim=-1).cpu().numpy()
+                        all_logits.extend(logits.cpu().numpy())
+                    else:
+                        predictions = outputs.get('predictions', [])
+                    
+                    all_predictions.extend(predictions)
+                    
+                    # Get targets
+                    if 'answer' in batch:
+                        # Convert answers to indices if needed
+                        targets = self._process_answers(batch['answer'])
+                        all_targets.extend(targets)
+        except Exception as e:
+            print(f"\nError evaluating {model_name}: {e}")
+            return {'error': str(e)}
         
         # Compute metrics
         metrics = {}
@@ -85,26 +94,44 @@ class BenchmarkRunner:
         if task_type == 'classification' and all_targets:
             metrics['accuracy'] = compute_accuracy(all_predictions, all_targets)
             
-            if len(set(all_targets)) > 2:  # Multi-class
-                f1_metrics = compute_f1_scores(all_predictions, all_targets)
-                metrics.update(f1_metrics)
+            try:
+                if len(set(all_targets)) > 2:  # Multi-class
+                    f1_metrics = compute_f1_scores(all_predictions, all_targets)
+                    metrics.update(f1_metrics)
+            except:
+                pass  # Skip F1 if it fails
         
         # Compute efficiency metrics
-        sample_batch = next(iter(dataloader))
-        if 'visual_features' in sample_batch:
-            sample_input = sample_batch['visual_features'][:4].to(self.device)
-        else:
-            sample_input = sample_batch['features'][:4].to(self.device)
-        
-        efficiency = compute_efficiency_metrics(model, sample_input)
-        metrics.update(efficiency)
+        try:
+            sample_batch = next(iter(dataloader))
+            if 'visual_features' in sample_batch:
+                sample_input = sample_batch['visual_features']
+                if isinstance(sample_input, list):
+                    sample_input = torch.stack(sample_input[:4])
+                else:
+                    sample_input = sample_input[:4]
+                sample_input = sample_input.to(self.device)
+            else:
+                sample_input = sample_batch['features']
+                if isinstance(sample_input, list):
+                    sample_input = torch.stack(sample_input[:4])
+                else:
+                    sample_input = sample_input[:4]
+                sample_input = sample_input.to(self.device)
+            
+            efficiency = compute_efficiency_metrics(model, sample_input)
+            metrics.update(efficiency)
+        except Exception as e:
+            print(f"\nWarning: Could not compute efficiency metrics: {e}")
         
         return metrics
     
     def _process_answers(self, answers: List[Any]) -> List[int]:
         """Convert answers to integer indices."""
-        if isinstance(answers[0], torch.Tensor):
+        if isinstance(answers, torch.Tensor):
             return answers.cpu().numpy().tolist()
+        elif isinstance(answers[0], torch.Tensor):
+            return [a.item() if a.numel() == 1 else int(a.cpu().numpy()) for a in answers]
         elif isinstance(answers[0], str):
             # Create answer vocabulary
             unique_answers = sorted(set(answers))
@@ -143,7 +170,7 @@ class BenchmarkRunner:
                     )
                     dataset_results[model_name] = metrics
                 except Exception as e:
-                    print(f"Error evaluating {model_name}: {e}")
+                    print(f"\nError evaluating {model_name}: {e}")
                     dataset_results[model_name] = {'error': str(e)}
             
             all_results[dataset_name] = dataset_results
@@ -211,9 +238,15 @@ class BenchmarkRunner:
                 optimizer.zero_grad()
                 
                 if 'visual_features' in batch:
-                    inputs = batch['visual_features'].to(self.device)
+                    inputs = batch['visual_features']
+                    if isinstance(inputs, list):
+                        inputs = torch.stack(inputs)
+                    inputs = inputs.to(self.device)
                 else:
-                    inputs = batch['features'].to(self.device)
+                    inputs = batch['features']
+                    if isinstance(inputs, list):
+                        inputs = torch.stack(inputs)
+                    inputs = inputs.to(self.device)
                 
                 # Get targets
                 targets = self._process_answers(batch['answer'])
