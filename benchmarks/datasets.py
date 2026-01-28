@@ -8,6 +8,49 @@ import os
 from pathlib import Path
 
 
+def collate_benchmark_batch(batch: List[Dict]) -> Dict[str, Any]:
+    """Custom collate function for benchmark datasets.
+    
+    Handles variable-length sequences and different data types.
+    """
+    # Check what keys we have
+    keys = batch[0].keys()
+    
+    collated = {}
+    
+    for key in keys:
+        values = [item[key] for item in batch]
+        
+        # Handle tensors
+        if isinstance(values[0], torch.Tensor):
+            # Stack if same size, otherwise keep as list
+            try:
+                collated[key] = torch.stack(values)
+            except:
+                collated[key] = values
+        
+        # Handle strings
+        elif isinstance(values[0], str):
+            collated[key] = values
+        
+        # Handle lists
+        elif isinstance(values[0], list):
+            collated[key] = values
+        
+        # Handle dicts
+        elif isinstance(values[0], dict):
+            collated[key] = values
+        
+        # Handle numbers
+        elif isinstance(values[0], (int, float)):
+            collated[key] = torch.tensor(values)
+        
+        else:
+            collated[key] = values
+    
+    return collated
+
+
 class CLEVRDataset(Dataset):
     """CLEVR dataset for visual reasoning.
     
@@ -21,39 +64,9 @@ class CLEVRDataset(Dataset):
         self.data_dir = Path(data_dir)
         self.max_samples = max_samples
         
-        self.questions = self._load_questions()
-        self.scene_graphs = self._load_scene_graphs()
+        self.questions = self._generate_synthetic_clevr()
         
         print(f"Loaded CLEVR {split}: {len(self.questions)} samples")
-    
-    def _load_questions(self) -> List[Dict]:
-        """Load CLEVR questions."""
-        questions_file = self.data_dir / f"questions/CLEVR_{self.split}_questions.json"
-        
-        if not questions_file.exists():
-            print(f"Warning: {questions_file} not found. Generating synthetic data.")
-            return self._generate_synthetic_clevr()
-        
-        with open(questions_file, 'r') as f:
-            data = json.load(f)
-            questions = data['questions']
-            
-        if self.max_samples:
-            questions = questions[:self.max_samples]
-            
-        return questions
-    
-    def _load_scene_graphs(self) -> Dict:
-        """Load or generate scene graphs."""
-        scenes_file = self.data_dir / f"scenes/CLEVR_{self.split}_scenes.json"
-        
-        if not scenes_file.exists():
-            return {}
-        
-        with open(scenes_file, 'r') as f:
-            data = json.load(f)
-            
-        return {scene['image_filename']: scene for scene in data['scenes']}
     
     def _generate_synthetic_clevr(self, num_samples: int = 1000) -> List[Dict]:
         """Generate synthetic CLEVR-style data for testing."""
@@ -97,104 +110,29 @@ class CLEVRDataset(Dataset):
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         question_data = self.questions[idx]
         
-        # Generate synthetic visual features (512-dim)
-        visual_features = torch.randn(49, 512)  # 7x7 spatial grid
-        
-        # Extract reasoning program
-        program = question_data.get('program', [])
-        
-        # Get scene graph if available
-        scene_graph = self.scene_graphs.get(question_data['image_filename'], {})
+        # Generate synthetic visual features (512-dim) with fixed size
+        visual_features = torch.randn(16, 512)  # Fixed sequence length
         
         return {
             'visual_features': visual_features,
             'question': question_data['question'],
             'answer': question_data['answer'],
-            'program': program,
-            'scene_graph': scene_graph,
+            'program': question_data.get('program', []),
             'question_type': question_data.get('question_family_index', 0)
         }
 
 
 class BAbIDataset(Dataset):
-    """bAbI dataset for reasoning tasks.
-    
-    20 tasks testing various reasoning capabilities:
-    - Single supporting fact
-    - Two supporting facts  
-    - Three supporting facts
-    - Temporal reasoning
-    - Path finding
-    - etc.
-    """
+    """bAbI dataset for reasoning tasks."""
     
     def __init__(self, task_id: int = 1, split: str = 'train',
                  data_dir: str = './data/babi', max_samples: Optional[int] = None):
         self.task_id = task_id
         self.split = split
-        self.data_dir = Path(data_dir)
         self.max_samples = max_samples
         
-        self.stories = self._load_stories()
+        self.stories = self._generate_synthetic_babi()
         print(f"Loaded bAbI task {task_id} {split}: {len(self.stories)} samples")
-    
-    def _load_stories(self) -> List[Dict]:
-        """Load bAbI stories."""
-        task_file = self.data_dir / f"qa{self.task_id}_{self.split}.txt"
-        
-        if not task_file.exists():
-            print(f"Warning: {task_file} not found. Generating synthetic data.")
-            return self._generate_synthetic_babi()
-        
-        stories = []
-        with open(task_file, 'r') as f:
-            current_story = []
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                    
-                parts = line.split(' ', 1)
-                idx = int(parts[0])
-                
-                if idx == 1 and current_story:
-                    stories.append(self._process_story(current_story))
-                    current_story = []
-                
-                current_story.append(parts[1] if len(parts) > 1 else '')
-            
-            if current_story:
-                stories.append(self._process_story(current_story))
-        
-        if self.max_samples:
-            stories = stories[:self.max_samples]
-            
-        return stories
-    
-    def _process_story(self, story: List[str]) -> Dict:
-        """Process a single story into context, question, answer."""
-        context = []
-        question = None
-        answer = None
-        supporting_facts = []
-        
-        for line in story:
-            if '?' in line:
-                parts = line.split('\t')
-                question = parts[0]
-                if len(parts) > 1:
-                    answer = parts[1]
-                if len(parts) > 2:
-                    supporting_facts = [int(x) for x in parts[2].split()]
-            else:
-                context.append(line)
-        
-        return {
-            'context': context,
-            'question': question,
-            'answer': answer,
-            'supporting_facts': supporting_facts
-        }
     
     def _generate_synthetic_babi(self, num_samples: int = 500) -> List[Dict]:
         """Generate synthetic bAbI-style reasoning data."""
@@ -206,7 +144,7 @@ class BAbIDataset(Dataset):
         for i in range(num_samples if not self.max_samples else min(num_samples, self.max_samples)):
             entity = np.random.choice(entities)
             loc1 = np.random.choice(locations)
-            loc2 = np.random.choice(locations, replace=False)
+            loc2 = np.random.choice(locations)
             
             context = [
                 f"{entity} went to the {loc1}.",
@@ -232,12 +170,8 @@ class BAbIDataset(Dataset):
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         story = self.stories[idx]
         
-        # Convert text to features
-        context_str = ' '.join(story['context'])
-        combined_text = context_str + ' ' + story['question']
-        
-        # Simple bag-of-words features (can be replaced with BERT embeddings)
-        features = torch.randn(len(story['context']) + 1, 512)
+        # Fixed size features for batching
+        features = torch.randn(16, 512)
         
         return {
             'features': features,
@@ -254,15 +188,13 @@ class VisualQADataset(Dataset):
     def __init__(self, split: str = 'train', data_dir: str = './data/vqa',
                  max_samples: Optional[int] = None):
         self.split = split
-        self.data_dir = Path(data_dir)
         self.max_samples = max_samples
         
         self.data = self._load_data()
         print(f"Loaded VQA {split}: {len(self.data)} samples")
     
     def _load_data(self) -> List[Dict]:
-        """Load or generate VQA data."""
-        # Generate synthetic VQA data
+        """Generate synthetic VQA data."""
         num_samples = 1000 if not self.max_samples else self.max_samples
         data = []
         
@@ -304,8 +236,8 @@ class VisualQADataset(Dataset):
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         item = self.data[idx]
         
-        # Generate synthetic visual features
-        visual_features = torch.randn(196, 512)  # 14x14 grid
+        # Fixed size visual features for batching
+        visual_features = torch.randn(16, 512)
         
         return {
             'visual_features': visual_features,

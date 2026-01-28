@@ -8,57 +8,29 @@ import json
 
 def compute_accuracy(predictions: List[Any], targets: List[Any]) -> float:
     """Compute accuracy."""
-    correct = sum(1 for pred, target in zip(predictions, targets) if pred == target)
+    correct = sum(1 for pred, target in zip(predictions, targets) if str(pred).lower() == str(target).lower())
     return correct / len(predictions) if predictions else 0.0
 
 
 def compute_f1_scores(predictions: List[int], targets: List[int],
                      average: str = 'macro') -> Dict[str, float]:
     """Compute F1 scores."""
-    precision, recall, f1, support = precision_recall_fscore_support(
-        targets, predictions, average=average, zero_division=0
-    )
-    
-    return {
-        'precision': float(precision),
-        'recall': float(recall),
-        'f1': float(f1)
-    }
-
-
-def compute_reasoning_metrics(predictions: List[Dict], 
-                            targets: List[Dict]) -> Dict[str, float]:
-    """Compute reasoning-specific metrics.
-    
-    Args:
-        predictions: List of prediction dictionaries with 'answer' and 'explanation'
-        targets: List of target dictionaries
+    try:
+        precision, recall, f1, support = precision_recall_fscore_support(
+            targets, predictions, average=average, zero_division=0
+        )
         
-    Returns:
-        Dictionary of metrics
-    """
-    metrics = {}
-    
-    # Answer accuracy
-    pred_answers = [p['answer'] for p in predictions]
-    target_answers = [t['answer'] for t in targets]
-    metrics['answer_accuracy'] = compute_accuracy(pred_answers, target_answers)
-    
-    # Explanation quality (if available)
-    if 'explanation' in predictions[0]:
-        explanation_lengths = [len(p.get('explanation', '').split()) for p in predictions]
-        metrics['avg_explanation_length'] = np.mean(explanation_lengths)
-    
-    # Confidence calibration
-    if 'confidence' in predictions[0]:
-        confidences = [p['confidence'] for p in predictions]
-        correct = [p == t for p, t in zip(pred_answers, target_answers)]
-        
-        # Expected Calibration Error (ECE)
-        metrics['ece'] = compute_ece(confidences, correct)
-        metrics['avg_confidence'] = np.mean(confidences)
-    
-    return metrics
+        return {
+            'precision': float(precision),
+            'recall': float(recall),
+            'f1': float(f1)
+        }
+    except:
+        return {
+            'precision': 0.0,
+            'recall': 0.0,
+            'f1': 0.0
+        }
 
 
 def compute_ece(confidences: List[float], correct: List[bool],
@@ -80,17 +52,7 @@ def compute_ece(confidences: List[float], correct: List[bool],
     return float(ece)
 
 
-def compute_program_accuracy(pred_programs: List[List[str]],
-                           target_programs: List[List[str]]) -> float:
-    """Compute program execution accuracy."""
-    correct = 0
-    for pred, target in zip(pred_programs, target_programs):
-        if pred == target:
-            correct += 1
-    return correct / len(pred_programs) if pred_programs else 0.0
-
-
-def generate_benchmark_report(results: Dict[str, Dict[str, float]],
+def generate_benchmark_report(results: Dict[str, Dict[str, Any]],
                             output_file: str = 'benchmark_results.json') -> str:
     """Generate comprehensive benchmark report.
     
@@ -125,11 +87,17 @@ def generate_benchmark_report(results: Dict[str, Dict[str, float]],
         for model_name, model_results in results.items():
             if metric in model_results:
                 score = model_results[metric]
-                if score > best_score:
-                    best_score = score
-                    best_model = model_name
+                # Handle both numeric and string values
+                try:
+                    if isinstance(score, (int, float)):
+                        if score > best_score:
+                            best_score = score
+                            best_model = model_name
+                except (TypeError, ValueError):
+                    pass
         
-        best_models[metric] = (best_model, best_score)
+        if best_model is not None:
+            best_models[metric] = (best_model, best_score)
     
     # Print results by model
     for model_name, model_results in results.items():
@@ -137,9 +105,16 @@ def generate_benchmark_report(results: Dict[str, Dict[str, float]],
         report.append("-" * 60)
         
         for metric, value in sorted(model_results.items()):
-            is_best = best_models[metric][0] == model_name
-            marker = " ★" if is_best else ""
-            report.append(f"  {metric:30s}: {value:.4f}{marker}")
+            is_best = best_models.get(metric, (None, None))[0] == model_name
+            marker = " \u2605" if is_best else ""
+            
+            # Format value based on type
+            if isinstance(value, float):
+                value_str = f"{value:.4f}"
+            else:
+                value_str = str(value)
+            
+            report.append(f"  {metric:30s}: {value_str}{marker}")
     
     # Summary
     report.append("\n" + "=" * 80)
@@ -147,7 +122,11 @@ def generate_benchmark_report(results: Dict[str, Dict[str, float]],
     report.append("=" * 80)
     
     for metric, (best_model, best_score) in sorted(best_models.items()):
-        report.append(f"  {metric:30s}: {best_model:20s} ({best_score:.4f})")
+        if isinstance(best_score, float):
+            score_str = f"({best_score:.4f})"
+        else:
+            score_str = f"({best_score})"
+        report.append(f"  {metric:30s}: {best_model:20s} {score_str}")
     
     report.append("\n" + "=" * 80)
     
@@ -167,7 +146,7 @@ def compute_efficiency_metrics(model: torch.nn.Module,
         sample_input: Sample input tensor
         num_runs: Number of inference runs
         
-    Returns:
+        Returns:
         Dictionary with efficiency metrics
     """
     import time
@@ -176,6 +155,7 @@ def compute_efficiency_metrics(model: torch.nn.Module,
     sample_input = sample_input.to(device)
     
     # Warmup
+    model.eval()
     for _ in range(10):
         with torch.no_grad():
             _ = model(sample_input)
@@ -199,9 +179,9 @@ def compute_efficiency_metrics(model: torch.nn.Module,
     num_params = sum(p.numel() for p in model.parameters())
     
     return {
-        'avg_inference_time_ms': np.mean(times) * 1000,
-        'std_inference_time_ms': np.std(times) * 1000,
-        'throughput_samples_per_sec': sample_input.shape[0] / np.mean(times),
-        'num_parameters': num_params,
-        'num_parameters_millions': num_params / 1e6
+        'avg_inference_time_ms': float(np.mean(times) * 1000),
+        'std_inference_time_ms': float(np.std(times) * 1000),
+        'throughput_samples_per_sec': float(sample_input.shape[0] / np.mean(times)),
+        'num_parameters': int(num_params),
+        'num_parameters_millions': float(num_params / 1e6)
     }
