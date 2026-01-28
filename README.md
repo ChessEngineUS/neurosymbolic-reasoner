@@ -6,11 +6,24 @@
 
 *Bridging Neural Perception and Symbolic Reasoning*
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ChessEngineUS/neurosymbolic-reasoner/blob/main/neurosymbolic_colab_demo.ipynb)
+[![Tests](https://github.com/ChessEngineUS/neurosymbolic-reasoner/actions/workflows/tests.yml/badge.svg)](https://github.com/ChessEngineUS/neurosymbolic-reasoner/actions/workflows/tests.yml)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 </div>
+
+## 🚀 Try it Now!
+
+**[Launch Interactive Demo in Google Colab](https://colab.research.google.com/github/ChessEngineUS/neurosymbolic-reasoner/blob/main/neurosymbolic_colab_demo.ipynb)** - No setup required, runs on free T4 GPU!
+
+The Colab notebook includes:
+- ✅ Complete system demonstration
+- ✅ Neural perception + symbolic reasoning examples
+- ✅ Training pipeline
+- ✅ Performance benchmarks
+- ✅ Interactive experiments
 
 ## Overview
 
@@ -25,6 +38,7 @@ This repository implements a cutting-edge neurosymbolic AI system that combines 
 - **Concept Learning**: Automatic discovery and composition of symbolic concepts
 - **Explainable AI**: Generate natural language explanations for reasoning processes
 - **Extensible Design**: Modular architecture for easy customization
+- **Comprehensive Tests**: Full test suite with CI/CD pipeline
 
 ## Architecture
 
@@ -58,7 +72,11 @@ pip install -r requirements.txt
 
 ## Quick Start
 
-### Basic Usage
+### Google Colab (Recommended)
+
+The fastest way to get started is using our [interactive Colab notebook](https://colab.research.google.com/github/ChessEngineUS/neurosymbolic-reasoner/blob/main/neurosymbolic_colab_demo.ipynb) - just click and run!
+
+### Local Usage
 
 ```python
 import torch
@@ -112,6 +130,27 @@ python examples/basic_usage.py
 # Training example
 python examples/training_example.py
 ```
+
+## Testing
+
+The repository includes a comprehensive test suite covering all components:
+
+```bash
+# Run all tests
+pytest tests/ -v
+
+# Run with coverage
+pytest tests/ --cov=neurosymbolic --cov-report=html
+
+# Run specific test module
+pytest tests/test_neural_module.py -v
+```
+
+Tests cover:
+- ✅ Neural module (encoder, concept learner)
+- ✅ Symbolic module (knowledge base, reasoning)
+- ✅ Integration layer (bridge, full system)
+- ✅ Training and inference pipelines
 
 ## System Requirements
 
